@@ -1,0 +1,68 @@
+name: Sync reverse-skill (upstream)
+
+on:
+  schedule:
+    # يوميًا في 03:30 UTC
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-reverse-skill
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/zhaoxuya520/reverse-skill.git
+          git fetch upstream main
+
+      - name: Subtree pull into reverse-skill/
+        id: sync
+        run: |
+          BEFORE=$(git rev-parse HEAD)
+          set +e
+          OUT=$(git subtree pull --prefix=reverse-skill upstream main \
+            -m "chore(reverse-skill): sync with upstream zhaoxuya520/reverse-skill" 2>&1)
+          STATUS=$?
+          set -e
+          echo "$OUT" | tail -20
+          AFTER=$(git rev-parse HEAD)
+          if [ "$STATUS" -ne 0 ]; then
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "result=unchanged" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=updated" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push updates
+        if: steps.sync.outputs.result == 'updated'
+        run: git push origin main
+
+      - name: Summary
+        run: |
+          echo "## نتيجة مزامنة reverse-skill" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          case "${{ steps.sync.outputs.result }}" in
+            updated)   echo "✅ تم التحديث: نسخة **reverse-skill/** متزامنة الآن مع المستودع الأصلي." >> "$GITHUB_STEP_SUMMARY" ;;
+            unchanged) echo "⏳ لا توجد تحديثات جديدة في المستودع الأصلي." >> "$GITHUB_STEP_SUMMARY" ;;
+            conflict)  echo "⚠️ تعارض في الدمج — يلزم تدخل يدوي (شغّل git subtree pull محليًا وحل التعارض)." >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
